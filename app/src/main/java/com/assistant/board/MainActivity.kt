@@ -343,22 +343,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderContent(toast: Boolean = false) {
         if (toast) Toast.makeText(this, "Reloaded \u2014 ${docs.size} docs", Toast.LENGTH_SHORT).show()
-        if (docs.isEmpty()) {
-            showOverview()
-            content.removeAllViews()
-            content.addView(emptyBoard())
-            return
-        }
         when (currentTab) {
-            "Overview" -> {
-                showOverview(); content.removeAllViews(); renderOverview()
-            }
             "Unscanned" -> {
+                // Always scans, even with an empty board (that's how you add files).
                 showOverview(); content.removeAllViews()
                 if (selectionMode && selected.isNotEmpty()) content.addView(selectionBar())
                 renderUnscanned()
             }
-            else -> renderTypeList(currentTab)
+            "Overview" -> {
+                showOverview(); content.removeAllViews()
+                if (docs.isEmpty()) content.addView(emptyBoard()) else renderOverview()
+            }
+            else -> {
+                if (docs.isEmpty()) {
+                    showOverview(); content.removeAllViews(); content.addView(emptyBoard())
+                } else {
+                    renderTypeList(currentTab)
+                }
+            }
         }
     }
 
@@ -1233,7 +1235,7 @@ class MainActivity : AppCompatActivity() {
             withAlpha(accent, 0x33), accent) {
             currentTab = "Unscanned"
             buildTabs()
-            if (ensureStorage()) renderContent()
+            renderContent()
         }.apply { setTextColor(Color.WHITE) })
         col.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(1), dp(10))
