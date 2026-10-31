@@ -1,0 +1,23 @@
+# Android / Gradle
+*.iml
+.gradle/
+/build
+/app/build/
+/captures
+.externalNativeBuild
+.cxx
+
+# Local config (machine-specific)
+local.properties
+
+# IDE
+/.idea/
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+
+# Build outputs
+*.apk
+*.aab
