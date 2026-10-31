@@ -220,6 +220,13 @@ class MainActivity : AppCompatActivity() {
         setContentView(root)
         window.statusBarColor = Color.parseColor("#0C0C0F")
         window.navigationBarColor = Color.parseColor("#0C0C0F")
+
+        // First launch: ask for storage access so scanning works.
+        val p = getSharedPreferences(Summarizer.PREFS, MODE_PRIVATE)
+        if (!p.getBoolean("asked_storage", false)) {
+            p.edit().putBoolean("asked_storage", true).apply()
+            if (!Environment.isExternalStorageManager()) ensureStorage()
+        }
     }
 
     override fun onResume() {
@@ -339,8 +346,7 @@ class MainActivity : AppCompatActivity() {
         if (docs.isEmpty()) {
             showOverview()
             content.removeAllViews()
-            content.addView(centered("No documents yet",
-                "Run board.py on your PC to pull and summarize your files."))
+            content.addView(emptyBoard())
             return
         }
         when (currentTab) {
@@ -830,8 +836,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderUnscanned() {
         content.addView(sectionLabel("Unscanned files"))
         if (!Environment.isExternalStorageManager()) {
-            content.addView(centered("No storage permission",
-                "Grant all-files access to list unscanned files."))
+            content.addView(permissionNeededView())
             return
         }
         val loading = TextView(this).apply {
@@ -1201,6 +1206,69 @@ class MainActivity : AppCompatActivity() {
         setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
         setPadding(0, dp(12), 0, dp(10))
+    }
+
+    private fun emptyBoard(): View {
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(48), dp(24), dp(48))
+        }
+        col.addView(TextView(this).apply {
+            text = "No documents yet"
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            gravity = Gravity.CENTER
+        })
+        col.addView(TextView(this).apply {
+            text = "Scan your phone to find documents, then summarize them " +
+                "with AI or by hand."
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(20))
+        })
+        col.addView(pillButton("Scan my documents",
+            withAlpha(accent, 0x33), accent) {
+            currentTab = "Unscanned"
+            buildTabs()
+            if (ensureStorage()) renderContent()
+        }.apply { setTextColor(Color.WHITE) })
+        col.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(1), dp(10))
+        })
+        col.addView(pillButton("AI Settings (\u2699)",
+            Color.parseColor("#22FFFFFF"), glassStroke) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }.apply { setTextColor(Color.parseColor("#C9CFDA")) })
+        return col
+    }
+
+    private fun permissionNeededView(): View {
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(48), dp(24), dp(48))
+        }
+        col.addView(TextView(this).apply {
+            text = "Storage permission needed"
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+            gravity = Gravity.CENTER
+        })
+        col.addView(TextView(this).apply {
+            text = "Grant \"All files access\" so the app can find and manage your documents."
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(18))
+        })
+        col.addView(pillButton("Grant permission",
+            withAlpha(accent, 0x33), accent) { requestAllFilesAccess() }
+            .apply { setTextColor(Color.WHITE) })
+        return col
     }
 
     private fun centered(title: String, subtitle: String): View =
