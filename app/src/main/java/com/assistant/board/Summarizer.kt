@@ -15,11 +15,12 @@ import java.util.zip.ZipFile
 object Summarizer {
 
     const val PREFS = "aiboard"
-    val PROVIDERS = listOf("GEMINI", "GROK", "HF")
+    val PROVIDERS = listOf("GEMINI", "GROK", "HF", "LOCAL")
     private val DEFAULT_MODEL = mapOf(
         "GEMINI" to "gemini-1.5-flash",
         "GROK" to "grok-2-latest",
-        "HF" to "meta-llama/Llama-3.1-8B-Instruct"
+        "HF" to "meta-llama/Llama-3.1-8B-Instruct",
+        "LOCAL" to "llama3.2:3b"
     )
 
     private var pdfInit = false
@@ -28,8 +29,12 @@ object Summarizer {
         "GEMINI" -> "Google Gemini"
         "GROK" -> "xAI Grok"
         "HF" -> "Hugging Face"
+        "LOCAL" -> "Local server (Ollama)"
         else -> p
     }
+
+    /** True if this provider needs a server URL rather than an API token. */
+    fun isLocal(p: String) = p == "LOCAL"
 
     fun defaultModel(p: String) = DEFAULT_MODEL[p] ?: ""
 
@@ -103,7 +108,8 @@ object Summarizer {
         val provider = prefs.getString("provider", "GEMINI") ?: "GEMINI"
         val token = prefs.getString("token_$provider", "") ?: ""
         if (token.isBlank()) {
-            throw IllegalStateException("No API token set for ${providerLabel(provider)}. Open Settings.")
+            val what = if (isLocal(provider)) "server URL" else "API token"
+            throw IllegalStateException("No $what set for ${providerLabel(provider)}. Open Settings.")
         }
         val model = prefs.getString("model_$provider", defaultModel(provider))!!
             .ifBlank { defaultModel(provider) }
@@ -114,7 +120,42 @@ object Summarizer {
             "GEMINI" -> gemini(token, model, prompt)
             "GROK" -> openai("https://api.x.ai/v1/chat/completions", token, model, prompt)
             "HF" -> openai("https://router.huggingface.co/v1/chat/completions", token, model, prompt)
+            "LOCAL" -> localServer(token, model, prompt)
             else -> throw IllegalStateException("Unknown provider")
+        }
+    }
+
+    /** Query a local server for the models it has (Ollama or OpenAI-compatible). */
+    fun detectModels(baseUrl: String): List<String> {
+        val url = baseUrl.trim().trimEnd('/')
+        try {
+            val resp = httpGet("$url/api/tags")
+            val arr = JSONObject(resp).getJSONArray("models")
+            val out = (0 until arr.length()).map { arr.getJSONObject(it).getString("name") }
+            if (out.isNotEmpty()) return out
+        } catch (_: Exception) {}
+        try {
+            val resp = httpGet("$url/v1/models")
+            val arr = JSONObject(resp).getJSONArray("data")
+            return (0 until arr.length()).map { arr.getJSONObject(it).getString("id") }
+        } catch (_: Exception) {}
+        throw RuntimeException("No models found at $url")
+    }
+
+    private fun localServer(baseUrl: String, model: String, prompt: String): String {
+        val url = baseUrl.trim().trimEnd('/')
+        return try {
+            // Ollama native API.
+            val body = JSONObject()
+                .put("model", model).put("prompt", prompt).put("stream", false)
+                .put("options", JSONObject().put("temperature", 0.2).put("num_predict", 48))
+                .toString()
+            val resp = httpPost("$url/api/generate", body,
+                mapOf("Content-Type" to "application/json"))
+            clean(JSONObject(resp).optString("response"))
+        } catch (e: Exception) {
+            // Fallback: OpenAI-compatible local server (LM Studio, llama.cpp, etc.).
+            openai("$url/v1/chat/completions", "", model, prompt)
         }
     }
 
@@ -132,6 +173,18 @@ object Summarizer {
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
         val resp = stream?.bufferedReader()?.use { it.readText() } ?: ""
         if (code !in 200..299) throw RuntimeException("HTTP $code: ${resp.take(180)}")
+        return resp
+    }
+
+    private fun httpGet(urlStr: String): String {
+        val conn = URL(urlStr).openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.connectTimeout = 8000
+        conn.readTimeout = 15000
+        val code = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        val resp = stream?.bufferedReader()?.use { it.readText() } ?: ""
+        if (code !in 200..299) throw RuntimeException("HTTP $code")
         return resp
     }
 
@@ -156,8 +209,11 @@ object Summarizer {
             .put("temperature", 0.2)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
             .toString()
-        val resp = httpPost(url, body,
-            mapOf("Content-Type" to "application/json", "Authorization" to "Bearer $token"))
+        val headers = if (token.isBlank())
+            mapOf("Content-Type" to "application/json")
+        else
+            mapOf("Content-Type" to "application/json", "Authorization" to "Bearer $token")
+        val resp = httpPost(url, body, headers)
         val out = JSONObject(resp).getJSONArray("choices").getJSONObject(0)
             .getJSONObject("message").getString("content")
         return clean(out)

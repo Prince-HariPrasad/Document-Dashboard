@@ -27,6 +27,9 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var tokenField: EditText
     private lateinit var modelField: EditText
+    private lateinit var tokenLabel: TextView
+    private lateinit var detectBtn: Button
+    private lateinit var detectInfo: TextView
     private lateinit var spinner: Spinner
     private var current = "GEMINI"
 
@@ -76,7 +79,8 @@ class SettingsActivity : AppCompatActivity() {
         }
         root.addView(spinner, rowParams())
 
-        root.addView(label("API token"))
+        tokenLabel = label("API token")
+        root.addView(tokenLabel)
         tokenField = EditText(this).apply {
             hint = "Paste token here"
             setHintTextColor(Color.parseColor("#808894"))
@@ -97,6 +101,25 @@ class SettingsActivity : AppCompatActivity() {
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         root.addView(modelField, rowParams())
+
+        detectBtn = Button(this).apply {
+            text = "Detect models"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            background = glass(12)
+            stateListAnimator = null
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            visibility = View.GONE
+            setOnClickListener { detectModels() }
+        }
+        root.addView(detectBtn, rowParams().apply { topMargin = dp(8) })
+        detectInfo = TextView(this).apply {
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(0, dp(6), 0, 0)
+        }
+        root.addView(detectInfo)
 
         // Load fields for the initially-selected provider, and on change.
         loadProvider(current)
@@ -126,11 +149,40 @@ class SettingsActivity : AppCompatActivity() {
             text = "Where to get tokens:\n" +
                 "• Gemini: aistudio.google.com/apikey\n" +
                 "• Grok: console.x.ai\n" +
-                "• Hugging Face: huggingface.co/settings/tokens"
+                "• Hugging Face: huggingface.co/settings/tokens\n" +
+                "• Local: on the model phone run Ollama (Termux: OLLAMA_HOST=0.0.0.0 ollama serve), " +
+                "then enter http://<that-phone-ip>:11434 and tap Detect."
             setTextColor(Color.parseColor("#808894"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setPadding(0, dp(20), 0, 0)
         })
+    }
+
+    private fun detectModels() {
+        val url = tokenField.text.toString().trim()
+        if (url.isBlank()) {
+            detectInfo.text = "Enter the server URL first (e.g. http://192.168.1.50:11434)"
+            return
+        }
+        detectInfo.text = "Detecting models at $url\u2026"
+        Thread {
+            val res = try {
+                "OK:" + Summarizer.detectModels(url).joinToString(", ")
+            } catch (e: Exception) {
+                "ERR:" + (e.message ?: "not reachable")
+            }
+            runOnUiThread {
+                if (res.startsWith("OK:")) {
+                    val models = res.removePrefix("OK:")
+                    detectInfo.text = "Found: $models"
+                    if (modelField.text.toString().isBlank())
+                        modelField.setText(models.substringBefore(",").trim())
+                } else {
+                    detectInfo.text = "Not reachable: " + res.removePrefix("ERR:") +
+                        "\nEnsure the server is running and both phones are on the same Wi-Fi."
+                }
+            }
+        }.start()
     }
 
     private fun loadProvider(p: String) {
@@ -138,6 +190,20 @@ class SettingsActivity : AppCompatActivity() {
         tokenField.setText(prefs.getString("token_$p", ""))
         modelField.setText(prefs.getString("model_$p", Summarizer.defaultModel(p)))
         modelField.hint = Summarizer.defaultModel(p)
+        if (Summarizer.isLocal(p)) {
+            tokenLabel.text = "Server URL"
+            tokenField.hint = "http://192.168.1.50:11434"
+            tokenField.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            detectBtn.visibility = View.VISIBLE
+            detectInfo.text = "Tap Detect to list models on your local server."
+        } else {
+            tokenLabel.text = "API token"
+            tokenField.hint = "Paste token here"
+            tokenField.inputType =
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            detectBtn.visibility = View.GONE
+            detectInfo.text = ""
+        }
     }
 
     private fun saveCurrentFields() {
